@@ -7,6 +7,13 @@ from time import strftime
 # Application
 application = fastapi.FastAPI()
 
+# API Endpoints (looped onto for registration)
+register_endpoints = [
+    # 'URL' and the execution 'command' are the necessary parameters required here per entry. Ensure that the command/alias used is installed on the server machine.
+    { "URL": "bash", "command":"bash", "file_extension":".sh", "timeout":10 },
+    { "URL": "python3", "command":"py", "file_extension":".py", "timeout":10 },
+]
+
 # Helper function to generate a source file
 def generate_source_file(source_string: str, file_name: str = "source_"+strftime("%Y-%m-%d_%H-%M-%S")) -> str:
     relative_file_path = "uploads/"
@@ -23,33 +30,30 @@ def generate_source_file(source_string: str, file_name: str = "source_"+strftime
 def greet():
     return "Hello! The code execution endpoint server is up and running."
 
-# Python 3 Source Upload Endpoint
-@application.post("/python3")
-def execute_py(string: str):
-    content = repr(string)[1:-1]      # repr() prevents escape sequence and such unintended string modifications. Slicing to omit quotation marks.
-    local_timestamp = strftime("_%Y-%m-%d_%H-%M-%S")
-    file_name = "program"+local_timestamp+".py"
-    file_path = generate_source_file(content, file_name)
+for endpoint in register_endpoints:
+    # Source Upload Endpoint
+    @application.post("/"+endpoint["URL"])
+    def execute_program(string: str):
+        content = string
+        # Local, temporary file generation
+        local_timestamp = strftime("_%Y-%m-%d_%H-%M-%S")
+        file_name = "program"+local_timestamp
+        if "file_extension" in endpoint: file_name += endpoint["file_extension"]
+        file_path = generate_source_file(content, file_name)
 
-    status = subprocess.run(f"py {file_path}", capture_output=True, timeout=60)
+        # Execution
+        status = subprocess.run(f"{endpoint['command']} \"{file_path}\"", capture_output=True, timeout=endpoint["timeout"] if "timeout" in endpoint else 60)
 
-    if status.stderr: return status
+        return status
 
-    return status.stdout
+    # File Upload Endpoint
+    @application.post("/%s/upload" %endpoint["URL"])
+    async def execute_program_file(file: fastapi.UploadFile):
+        # Reading file content
+        content = await file.read()
 
-# Python 3 File Upload Endpoint
-@application.post("/python3/upload")
-async def execute_py_file(file: fastapi.UploadFile):
-    # Reading file content and dumping it to a temporary file
-    content = await file.read()
-    local_timestamp = strftime("_%Y-%m-%d_%H-%M-%S")
-    file_name = "program"+local_timestamp+".py"
-    file_path = generate_source_file(content.decode("utf-8"), file_name)
-
-    # Executing the Python program
-    status = subprocess.run(f"py {file_path}", capture_output=True, timeout=60)
-
-    return status
+        # Executing the program
+        return execute_program(content.decode("utf-8"))
 
 # Starting the application server on direct file run
 if __name__ == "__main__":
